@@ -1,0 +1,25 @@
+name: PlayerLog
+version: 1.0.0
+api: [1.6.0]
+author: yf001
+description: ブロックのログをとります
+main: PlayerLog\MainClass
+load: STARTUP
+
+commands:
+  log:
+    description: "ブロックのログを見れます。"
+    usage: "/log"
+    permission: "log.command.log"
+permissions:
+  log:
+    default: op
+    description: "PlayerLogの最高権限"
+    children:
+      log.command:
+        default: op
+        description: "コマンドの最高権限"
+        children:
+         log.command.log:
+            default: op
+            description: "ブロックのログ確認"
