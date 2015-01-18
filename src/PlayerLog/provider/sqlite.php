@@ -50,8 +50,19 @@ class sqlite {
 		$stmt->execute();
 		//後回し
 	}
+	
+	public function getLogCount($pos){
+		$xyz = $pos->getLevel()->getName().",".$pos->getX().",".$pos->getY().",".$pos->getZ();//座標
+		$result = $this->dbb->query("select count(*) from sqlite_master where type='table' and name='{$xyz}'")->fetchArray(SQLITE3_ASSOC);
+		if($result["count(*)"] == 1){
+			$result2 = $this->dbb->query("select count(*) from '{$xyz}'")->fetchArray(SQLITE3_ASSOC);
+			return $result2["count(*)"];
+		}else{
+			return null;//ない場合はnullを返す
+		}
+	}
 
-	public function getLog($block,$page,$player){
+	public function getLog($block,$page){
 		$xyz = $block->getLevel()->getName().",".$block->getX().",".$block->getY().",".$block->getZ();//座標
 		$result = $this->dbb->query("select count(*) from sqlite_master where type='table' and name='{$xyz}'")->fetchArray(SQLITE3_ASSOC);
 		if($result["count(*)"] == 1){
@@ -60,7 +71,7 @@ class sqlite {
 				$page = 1;
 			}
 			$result3 = $this->dbb->query("select * from '{$xyz}' where id = '{$page}'")->fetchArray(SQLITE3_ASSOC);
-			//var_dump($result3);
+			var_dump($result3);
 			$result3['idc'] = $result2["count(*)"];
 			/*if($result3["id"] == Block::WALL_SIGN or $result3["id"] == Block::SIGN_POST){
 				$result3['sign'] = true;

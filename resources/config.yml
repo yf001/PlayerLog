@@ -1,1 +1,20 @@
-test: 0
+#PlayerLogの設定ファイル
+#データの変更方法
+#以下値の部分だけを変更してください
+# test: 値
+
+#データの保存形式 未実装
+#対応保存形式 sqlite(推奨) yaml(非推奨) mysql
+provider: sqlite
+
+#ブロックの破壊を記録する
+blockbreak: true
+
+#ブロックの設置を記録する
+blockplace: true
+
+#ブロックのタッチを記録する 未実装
+blocktap: true
+
+#プレーヤーがコマンドを打つとコンソールに表示するようにする
+playercmd: true

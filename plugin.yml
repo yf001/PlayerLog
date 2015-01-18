@@ -2,7 +2,7 @@ name: PlayerLog
 version: 1.0.0
 api: [1.6.0]
 author: yf001
-description: ブロックのログをとります
+description: プレーヤーのログをとります
 main: PlayerLog\MainClass
 load: STARTUP
 
@@ -11,6 +11,14 @@ commands:
     description: "ブロックのログを見れます。"
     usage: "/log"
     permission: "log.command.log"
+  rollback:
+    description: "指定した範囲をロールバックします"
+    usage: "/rollback help"
+    permission: "log.command.rollback"
+  test:
+    description: "テストコマンド"
+    usage: "/test <値>"
+    permission: "log.command"
 permissions:
   log:
     default: op
@@ -18,8 +26,11 @@ permissions:
     children:
       log.command:
         default: op
-        description: "コマンドの最高権限"
+        description: "Logコマンドの最高権限"
         children:
          log.command.log:
             default: op
             description: "ブロックのログ確認"
+         log.command.rollback:
+            default: op
+            description: "/rollbackコマンドを使えるようになります"
