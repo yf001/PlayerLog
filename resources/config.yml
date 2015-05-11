@@ -1,20 +1,21 @@
-#PlayerLog‚ÌÝ’èƒtƒ@ƒCƒ‹
-#ƒf[ƒ^‚Ì•ÏX•û–@
-#ˆÈ‰º’l‚Ì•”•ª‚¾‚¯‚ð•ÏX‚µ‚Ä‚­‚¾‚³‚¢
-# test: ’l
+#PlayerLogã®è¨­å®šãƒ•ã‚¡ã‚¤ãƒ«
+# true/æœ‰åŠ¹ false/ç„¡åŠ¹
 
-#ƒf[ƒ^‚Ì•Û‘¶Œ`Ž® –¢ŽÀ‘•
-#‘Î‰ž•Û‘¶Œ`Ž® sqlite(„§) yaml(”ñ„§) mysql
+#ãƒ‡ãƒ¼ã‚¿ã®ä¿å­˜å½¢å¼ æœªå®Ÿè£…
+#å¯¾å¿œä¿å­˜å½¢å¼ sqlite
 provider: sqlite
 
-#ƒuƒƒbƒN‚Ì”j‰ó‚ð‹L˜^‚·‚é
+#ãƒ–ãƒ­ãƒƒã‚¯ã®ç ´å£Šã‚’è¨˜éŒ²ã™ã‚‹
 blockbreak: true
 
-#ƒuƒƒbƒN‚ÌÝ’u‚ð‹L˜^‚·‚é
+#ãƒ–ãƒ­ãƒƒã‚¯ã®è¨­ç½®ã‚’è¨˜éŒ²ã™ã‚‹
 blockplace: true
 
-#ƒuƒƒbƒN‚Ìƒ^ƒbƒ`‚ð‹L˜^‚·‚é –¢ŽÀ‘•
-blocktap: true
-
-#ƒvƒŒ[ƒ„[‚ªƒRƒ}ƒ“ƒh‚ð‘Å‚Â‚ÆƒRƒ“ƒ\[ƒ‹‚É•\Ž¦‚·‚é‚æ‚¤‚É‚·‚é
+#ãƒ—ãƒ¬ãƒ¼ãƒ¤ãƒ¼ãŒã‚³ãƒžãƒ³ãƒ‰ã‚’æ‰“ã¤ã¨ã‚³ãƒ³ã‚½ãƒ¼ãƒ«ã«è¡¨ç¤ºã™ã‚‹ã‚ˆã†ã«ã™ã‚‹
 playercmd: true
+
+#çœ‹æ¿ã®å†…å®¹ã‚’è¨˜éŒ²
+sign: true
+
+#ãƒ—ãƒ¬ãƒ¼ãƒ¤ãƒ¼ã®å…¥é€€å®¤ã‚’è¨˜éŒ²ã™ã‚‹
+playerjoin: false
