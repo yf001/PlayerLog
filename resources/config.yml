@@ -14,8 +14,11 @@ blockplace: true
 #プレーヤーがコマンドを打つとコンソールに表示するようにする
 playercmd: true
 
-#看板の内容を記録
-sign: true
-
 #プレーヤーの入退室を記録する
 playerjoin: false
+
+#ブロック名を日本語表示にするか
+blockNameJP: true
+
+#時間表示でのGMT(グリニッジ標準時)とのズレ修正(日本時間 +9時間)
+GMT: 9

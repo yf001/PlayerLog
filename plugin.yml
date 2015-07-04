@@ -1,19 +1,19 @@
 name: PlayerLog
-version: 1.1.0
+version: 1.2.0
 api: [1.6.0]
 author: yf001
-description: プレーヤーのログをとります
+description: This plugin is records the action of player
 main: PlayerLog\MainClass
 load: STARTUP
 
 commands:
   log:
-    description: "ブロックのログを見ます"
+    description: "ブロックのログを表示します"
     usage: "/log"
     permission: "log.command.log"
   plog:
     description: "プレーヤーの入退室ログを見ます"
-    usage: "/plog　<プレーヤー名> [ページ番号]"
+    usage: "/plog [name|ip] <プレーヤー名>"
     permission: "log.command.plog"
   rollback:
     description: "指定した範囲をロールバックします"
@@ -22,18 +22,18 @@ commands:
 permissions:
   log:
     default: op
-    description: "PlayerLogの最高権限"
+    description: "PlayerLogのすべての機能を使用することができます"
     children:
       log.command:
         default: op
-        description: "PlayerLogのすべてのコマンドを使用できます"
+        description: "PlayerLogのすべてのコマンドを使用することができます"
         children:
          log.command.log:
             default: op
-            description: "logコマンドを使用できるようになります"
+            description: "logコマンドを使用することができます"
          log.command.rollback:
             default: op
-            description: "rollbackコマンドを使用できるようになります"
+            description: "rollbackコマンドを使用することができます"
          log.command.plog:
             default: op
-            description: "plogコマンドを使用できるようになります"
+            description: "plogコマンドを使用することができます"

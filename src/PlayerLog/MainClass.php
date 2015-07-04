@@ -1,6 +1,6 @@
 <?php
 /*
- * PlayerLog plugin for PocketMine-MP
+ * PlayerLog
  * Copyright (C) 2015 yf001
  * 
  * This program is free software: you can redistribute it and/or modify
@@ -35,82 +35,160 @@ use pocketmine\Server;
 use pocketmine\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\permission\ServerOperator;
+use pocketmine\network\protocol\UpdateBlockPacket;
+use pocketmine\tile\Sign;
+use pocketmine\tile\Tile;
 use pocketmine\utils\Config;
 use pocketmine\utils\TextFormat;
-use PlayerLog\provider\sqlite;
+
+use pocketmine\nbt\tag\Compound;
+use pocketmine\nbt\tag\Int;
+use pocketmine\nbt\tag\String;
+
+use PlayerLog\provider\ProviderManager;
+use PlayerLog\provider\Sqlite;
 
 class MainClass extends PluginBase implements Listener {
-
+	
+	private $config, $log, $providerManager;
+	
 	public function onEnable() {//起動時の処理
 		$this->saveDefaultConfig();
 		$this->reloadConfig();
 		@mkdir($this->getDataFolder(), 0755, true);
 		$this->config = new Config($this->getDataFolder() . "config.yml", Config::YAML);
+		
+		ProviderManager::addProvider(new Sqlite($this));
+		//ProviderManager::addProvider(new Mysql($this));//todo...
+		if(($this->provider = ProviderManager::getProvider($this->config->get("provider"))) === false){
+			$this->provider = ProviderManager::getProvider("sqlite");
+		}
+		
 		$this->getServer()->getPluginManager()->registerEvents($this, $this);
-		$this->getLogger()->info("ブロックの記録を開始します");
-		$this->sqlite = new sqlite($this);
+		
 		$this->log = array();
+		
+		$this->getLogger()->info("プレーヤーの行動の記録を 保存形式:" . $this->provider->getName());
 	}
 /////////////////////////////////
-// イベント
+// Event
 /////////////////////////////////
 	
 	public function onJoin(PlayerJoinEvent $event){
+		$player = $event->getPlayer();
 		if($this->config->get("playerjoin") === true){
-			$this->sqlite->addPlayerLog($event->getPlayer(), "join");
+			$this->provider->addPlayerLog($player, "join");
 		}
 	}
 	
 	public function onQuit(PlayerQuitEvent $event){
+		$player = $event->getPlayer();
 		if($this->config->get("playerjoin") === true){
-			$this->sqlite->addPlayerLog($event->getPlayer(), "quit");
+			$this->provider->addPlayerLog($player, "quit");
 		}
-		unset($this->log[$event->getPlayer()->getName()]);
+		unset($this->log[$player->getName()]);
 	}
 	
 	public function onBreak(BlockBreakEvent $event) {//ブロックの破壊
 		if($this->config->get("blockbreak") === true){
+			$player = $event->getPlayer();
 			$block = $event->getBlock();
-			if(isset($this->log[$event->getPlayer()->getName()])){
+			if(isset($this->log[$player->getName()])){
 				$event->setCancelled();
+				return true;
 			}
-			$this->sqlite->addLog($event->getPlayer(), $block, 'Break');
+			$id = $block->getId();
+			if($id === Block::DOOR_BLOCK or $id === Block::IRON_DOOR_BLOCK){
+				if($block->getDamage() === 0x08 or $block->getDamage() === 0x09){//上部のドアブロック
+					$this->provider->addBlockLog($player, $block->getSide(Vector3::SIDE_DOWN), $block->getSide(Vector3::SIDE_DOWN), 'Break');
+				}else{//下部のドアブロック
+					$this->provider->addBlockLog($player, $block->getSide(Vector3::SIDE_UP), $block->getSide(Vector3::SIDE_UP), 'Break');
+				}
+			}
+			$this->provider->addBlockLog($player, $block, $block, 'Break');
 		}
 	}
 
 	public function onPlace(BlockPlaceEvent $event) {//ブロックの設置
+		$player = $event->getPlayer();
+		$block = clone $event->getBlock();
+		if(isset($this->log[$player->getName()])){
+			$event->setCancelled();
+			return true;
+		}
+		if($this->config->get("blockplace") === true and !$event->isCancelled()){
+			$id = $block->getId();
+			if(!($id === Block::SIGN_POST or $id === Block::WALL_SIGN)){
+				if($id === Block::LADDER or $id === Block::FURNACE or $id === Block::BURNING_FURNACE or $id === Block::CHEST){
+					$block->setDamage($player->getDirection());
+				}elseif($id === Block::DOOR_BLOCK or $id === Block::IRON_DOOR_BLOCK){
+					$d = $player->getDirection();
+					$face = array(
+						0 => 3,//south
+						1 => 4,//west
+						2 => 2,//north
+						3 => 5,//east
+					);
+					$next = $block->getSide($face[(($d + 2) % 4)]);//方位を反転//蝶番(ちょうつがい)の方の隣
+					$next2 = $block->getSide($face[$d]);//開く方の隣
+					$meta = 0x08;
+					//隣接ブロックがドアブロックだった場合 または 蝶番の方が透明でかつ開くほうが不透明の場合 は蝶番の方を逆に。
+					if($next->getId() === $block->getId() or ($next2->isTransparent() === false and $next->isTransparent() === true)){
+						$meta |= 0x01;
+					}
+					$this->provider->addBlockLog($player, $block->getSide(Vector3::SIDE_UP), Block::get($block->getId(), $meta), 'Place');
+					$block->setDamage($d);
+				}
+				$this->provider->addBlockLog($player, $block, $block, 'Place');
+			}
+		}
+	}
+	
+	public function onSignChange(SignChangeEvent $event){//看板の内容変更
 		if($this->config->get("blockplace") === true){
 			$block = $event->getBlock();
-			if(isset($this->log[$event->getPlayer()->getName()])){
-				$event->setCancelled();
+			$player = $event->getPlayer();
+			$text = $event->getLines();
+			if(($tile = $block->getLevel()->getTile($block)) instanceof Sign){
+				$nbt = $tile->getSpawnCompound();
+				$nbt->Text1 = $text[0];
+				$nbt->Text2 = $text[1];
+				$nbt->Text3 = $text[2];
+				$nbt->Text4 = $text[3];
+				$this->provider->addTileBlockLog($player, $block, 'Place', $nbt);
 			}
-			$xyz = $block->getLevel()->getName() . "," . $block->getX() . "," . $block->getY() . "," . $block->getZ();
-			$this->signid[$xyz] = $this->sqlite->addLog($event->getPlayer(), $block, 'Place');
 		}
 	}
 
 	public function onInteract(PlayerInteractEvent $event) {//ブロックタッチ
 		$player = $event->getPlayer();
+		$block = $event->getBlock();
+		$player->sendMessage("id:" . $block->getId() . " meta:" . $block->getDamage());
 		if(isset($this->log[$player->getName()])){
 			$block = $event->getBlock();
 			$xyz = $block->getLevel()->getName() . "," . $block->getX() . "," . $block->getY() . "," . $block->getZ();
 			if(!isset($this->log[$player->getName()][$xyz])){
 				$this->log[$player->getName()][$xyz] = 1;
 			}
-			$log = $this->sqlite->getLog($block,$this->log[$player->getName()][$xyz], $player);
+			$log = $this->provider->getBlockLog($block, $this->log[$player->getName()][$xyz], $player);
 			if($log !== false){
-				//[id] ページ数, [idc] 最大ページ数, [blockid] ブロックのid, [user] ブロックを変更したプレーヤーの名前, [ip] 変更したプレーヤーのip, [time] 変更された時間
+				$exp = explode(":", $log['blockid']);
+				$blockid = (int) $exp[0];
 				$type = ($log['type'] == 'Break')? '破壊':'設置';
-				$player->sendMessage("[Log] [" . $log['id'] . "/" . $log['idc'] . "][world:" . $block->getLevel()->getName() . "][x:" . $block->getX() . "][y:" . $block->getY() . "][x:" . $block->getZ() . "]");
-				$player->sendMessage("[Log] BlockID: " . $log['blockid'] . " (" . $block->getName() . ")");
+				$blockName = ($this->config->get("blockNameJP") === true) ? $this->getItemName($blockid, $exp[1]):$block->getName();
+				$player->sendMessage("[Log] [" . $log['id'] . "/" . $log['count'] . "][ワールド:" . $block->getLevel()->getName() . "][x:" . $block->getX() . "][y:" . $block->getY() . "][x:" . $block->getZ() . "]");
+				$player->sendMessage("[Log] BlockID: " . $log['blockid'] . " (" . $blockName . ")");
 				$player->sendMessage("[Log] ブロックを" . $type . "したプレーヤー: " . $log['user'] . " ip:" . $log['ip']);
-				$player->sendMessage("[Log] ブロックが" . $type . "された時間:".$this->dateConversion($log['time']));
-				if(isset($log['sign'])){
-					if($log['sign'] !== false){
-						$player->sendMessage("[Log] 看板の文字: " . $log['sign']["text1"] . " | " . $log['sign']["text2"] . " | " . $log['sign']["text3"] . " | " . $log['sign']["text4"]);
+				$player->sendMessage("[Log] ブロックが" . $type . "された時間:" . gmdate("Y年n月j日G時i分s秒", $log['time'] + $this->config->get("GMT") * 3600));
+				if(($blockid === Block::SIGN_POST or $blockid === Block::WALL_SIGN) and $log['nbt'] !== null){
+					$nbt = @unserialize($log['nbt']);
+					if($nbt === false){
+						$player->sendMessage("[Log] 看板の文章: NBTデータの復元に失敗しました");
+					}else{
+						$player->sendMessage("[Log] 看板の文章: " . $nbt->Text1 . ", " . $nbt->Text2 . ", " . $nbt->Text3 . ", " . $nbt->Text4);
 					}
 				}
-				if($this->log[$player->getName()][$xyz] > $log['idc']){
+				if($this->log[$player->getName()][$xyz] > $log['count']){
 					$this->log[$player->getName()][$xyz] = 1;
 				}else{
 					++$this->log[$player->getName()][$xyz];
@@ -123,14 +201,10 @@ class MainClass extends PluginBase implements Listener {
 		}elseif(isset($this->rollback[$player->getName()])){
 			$block = $event->getBlock();
 			if($this->rollback[$player->getName()] == 1){
-				$this->rbpos[$player->getName()][1][0] = $block->getX();
-				$this->rbpos[$player->getName()][1][1] = $block->getY();
-				$this->rbpos[$player->getName()][1][2] = $block->getZ();
+				$this->rbpos[$player->getName()][0] = $block;
 				$player->sendMessage("[RollBack] 始点を設定しました");
 			}elseif($this->rollback[$player->getName()] == 2){
-				$this->rbpos[$player->getName()][2][0] = $block->getX();
-				$this->rbpos[$player->getName()][2][1] = $block->getY();
-				$this->rbpos[$player->getName()][2][2] = $block->getZ();
+				$this->rbpos[$player->getName()][1] = $block;
 				$player->sendMessage("[RollBack] 終点を設定しました");
 			}
 			unset($this->rollback[$player->getName()]);
@@ -139,23 +213,13 @@ class MainClass extends PluginBase implements Listener {
 			//後回し
 		}
 	}
-
-	public function onSign(SignChangeEvent $event) {//看板設置
-		$data = $event->getLines();
-		$block = $event->getBlock();
-		$xyz = $block->getLevel()->getName() . "," . $block->getX() . "," . $block->getY() . "," . $block->getZ();
-		if(isset($this->signid[$xyz]) and ($data[0] . $data[1] . $data[2] . $data[3]) !== ""){
-			$this->sqlite->addLogSign($block, $data, $this->signid[$xyz]);
-		}
-		$event->getPlayer()->sendMessage($xyz);
-	}
 	
 	//コマンド
 	public function onPlayerCommand(PlayerCommandPreprocessEvent $event){
 		if($this->config->get("playercmd") == "true"){
 			$player = $event->getPlayer();
 			$m = $event->getMessage();
-			if($m[0] == "/"){
+			if($m[0] === "/"){
 				if(strpos($m, '/register') !== false or strpos($m, '/login') !== false){
 					$this->getLogger()->info($player->getName() . "さんがコマンド" . $this->getCommandName($m) . "を使用しました");
 				}else{
@@ -166,8 +230,9 @@ class MainClass extends PluginBase implements Listener {
 	}
 
 /////////////////////////////////
-// コマンド
+// Commands
 /////////////////////////////////
+	
 	//コマンド処理
 	public function onCommand(CommandSender $sender, Command $command, $label, array $args) {
 		switch (strtolower($command->getName())) {
@@ -182,36 +247,55 @@ class MainClass extends PluginBase implements Listener {
 				return true;
 			break;
 			case "plog":
-				if(isset($args[0])){
-					$log = $this->sqlite->getPlayerLog($args[0]);
+				if(!isset($args[0])){
+					$sender->sendMessage("[PLog] プレーヤーを指定して下さい");
+					return false;
+				}
+				if(isset($args[1]) and $args[0] === "ip"){
+					$log = $this->provider->getPlayerLog($args[1], true);
 					if($log === false){
-						$sender->sendMessage("指定されたプレーヤーのログが見つかりませんでした");
+						$sender->sendMessage("[PLog] 指定されたIPアドレスのログが見つかりませんでした");
 						return true;
 					}
-					$page = (isset($args[1])) ? $args[1] - 1:0;
-					$count = $log["idc"];
-					unset($log["idc"]);
-					if($sender instanceof ConsoleCommandSender){
-						$data = array($log);
-					}else{
-						$data = array_chunk($log, 4);
-					}
-					if(!isset($data[$page])){
-						$page = 0;
-					}
-					if($sender instanceof ConsoleCommandSender){
-						$message = "----- " . $args[0] . "の入室記録 -----\n";
-					}else{
-						$message = "----- " . $args[0] . "の入室記録 " . ($page + 1) . "/" . ($count / ceil(count($data[0]))) . " -----\n";
-					}
-					foreach($data[$page] as $value){
-						$type = ($value["type"] == "join") ? "入室":"退出";
-						$message .= $type . ":" . $this->dateConversion($value["time"]) . ":" . $value["ip"] . "\n";
-					}
-					$sender->sendMessage($message);
 				}else{
-					$sender->sendMessage("[PlayerLog] プレーヤーを指定して下さい");
+					$log = $this->provider->getPlayerLog($args[0]);
+					if($log === false){
+						$sender->sendMessage("[PLog] 指定されたプレーヤーのログが見つかりませんでした");
+						return true;
+					}
 				}
+				$keyword = $args[0];
+				$ip = false;
+				if(isset($args[1]) and $args[0] === "ip"){
+					$keyword = $args[1];
+					$ip = true;
+				}
+				$log = $this->provider->getPlayerLog($keyword, $ip);
+				if($log === false){
+					$sender->sendMessage("[PLog] 指定された" . (($ip) ? "IPアドレス":"プレーヤー") . "のログが見つかりませんでした");
+					return true;
+				}
+				$page = (isset($args[1])) ? $args[1] - 1:0;
+				$count = count($log);
+				if($sender instanceof ConsoleCommandSender){
+					$data = array($log);
+				}else{
+					$data = array_chunk($log, 4);
+				}
+				if(!isset($data[$page])){
+					$page = 0;
+				}
+				if($sender instanceof ConsoleCommandSender){
+					$message = "----- " . (($ip) ? $args[1]:$args[0]) . "の入室記録 -----\n";
+				}else{
+					$message = "----- " . (($ip) ? $args[1]:$args[0]) . "の入室記録 " . ($page + 1) . "/" . ($count / ceil(count($data[0]))) . " -----\n";
+				}
+				$gmt = $this->config->get("GMT");
+				foreach($data[$page] as $value){
+					$type = ($value["type"] == "join") ? "入室":"退出";
+					$message .= $value['user'] . ":" . $type . ":" . gmdate("Y年n月j日G時i分s秒", $value['time'] + ($gmt * 3600)) . ":" . $value["ip"] . "\n";
+				}
+				$sender->sendMessage($message);
 				return true;
 			break;
 			case "rollback":
@@ -229,7 +313,7 @@ class MainClass extends PluginBase implements Listener {
 						break;
 					case "rollback":
 					case "rb":
-						if(isset($this->rbpos[$sender->getName()][1]) and isset($this->rbpos[$sender->getName()][2])){
+						if(isset($this->rbpos[$sender->getName()][0]) and isset($this->rbpos[$sender->getName()][1])){
 							if(isset($args[1])){
 								if($args[1] > 0){
 									$generation = $args[1];
@@ -239,7 +323,7 @@ class MainClass extends PluginBase implements Listener {
 							}else{
 								$generation = 1;
 							}
-							if($this->rollback($sender, $generation)){
+							if($this->rollback($this->rbpos[$sender->getName()][0], $this->rbpos[$sender->getName()][1], $sender->getLevel(), $generation)){
 								$sender->sendMessage("[RollBack] ロールバックが完了しました");
 							}else{
 								$sender->sendMessage("[RollBack] ロールバックに失敗しました");
@@ -248,11 +332,36 @@ class MainClass extends PluginBase implements Listener {
 							$sender->sendMessage("[RollBack] 始点と終点を指定してください");
 						}
 						break;
+					/*case "PlayerRollBack":
+					case "prollback":
+					case "prb":
+						if(isset($this->rbpos[$sender->getName()][1]) and isset($this->rbpos[$sender->getName()][2])){
+							if(isset($args[1])){
+								if(isset($args[2])){
+									if($args[2] > 0){
+										$generation = $args[2];
+									}else{
+										$sender->sendMessage("[RollBack] 世代は0以上で指定して下さい");
+									}
+								}
+								if($this->playerRollback($player, $generation)){
+									$sender->sendMessage("[RollBack] ロールバックが完了しました");
+								}else{
+									$sender->sendMessage("[RollBack] ロールバックに失敗しました");
+								}
+							}else{
+								$sender->sendMessage("[RollBack] プレーヤーを指定して下さい");
+							}
+						}else{
+							$sender->sendMessage("[RollBack] 始点と終点を指定してください");
+						}
+						break;*/
 					default:
 						$sender->sendMessage("[RollBack] -------コマンド一覧-------");
 						$sender->sendMessage("[RollBack] /rollback pos1:始点の指定");
 						$sender->sendMessage("[RollBack] /rollback pos2:終点の指定");
-						$sender->sendMessage("[RollBack] /rollback rollback [世代]:指定された範囲をロールバックします");
+						$sender->sendMessage("[RollBack] /rollback rb [世代]:指定された範囲をロールバックします");
+						//sender->sendMessage("[RollBack] /rollback prb <プレーヤー名> [世代]:指定された範囲をプレーヤの世代でロールバックします");
 				}
 				return true;
 			break;
@@ -260,53 +369,84 @@ class MainClass extends PluginBase implements Listener {
 	}
 
 /////////////////////////////////
-// ロールバックの処理
+// Rollback
 /////////////////////////////////
 	
-	public function rollback($player, $backtime = 1) {
-		if(isset($this->rbpos[$player->getName()][1]) and isset($this->rbpos[$player->getName()][2])){
-			$pos = $this->rbpos[$player->getName()];
-			$level = $player->getLevel();
-			$sx = min($pos[1][0], $pos[2][0]);
-			$sy = min($pos[1][1], $pos[2][1]);
-			$sz = min($pos[1][2], $pos[2][2]);
-			$ex = max($pos[1][0], $pos[2][0]);
-			$ey = max($pos[1][1], $pos[2][1]);
-			$ez = max($pos[1][2], $pos[2][2]);
-			for($x = $sx; $x <= $ex; ++$x){
-				for($y = $sy; $y <= $ey; ++$y){
-					for($z = $sz; $z <= $ez; ++$z){
-						//[id] ページ数, [idc] 最大ページ数, [blockid] ブロックのid, [user] ブロックを変更したプレーヤーの名前, [ip] 変更したプレーヤーのip, [time] 変更された時間
-						$posp = new Position($x, $y, $z, $level);
-						$count = $this->sqlite->getLogCount($posp);
-						if(($count - 1) > 0){
-							if($count - $backtime <= 0){//指定された世代のブロックがない場合、一世代戻すように
-								$backtime = 1;
+	public function rollback(Position $start, Position $end, Level $level, $generation = 1){
+		$sx = min($start->x, $end->x);
+		$sy = min($start->y, $end->y);
+		$sz = min($start->z, $end->z);
+		$ex = max($start->x, $end->x);
+		$ey = max($start->y, $end->y);
+		$ez = max($start->z, $end->z);
+		for($x = $sx; $x <= $ex; ++$x){
+			for($y = $sy; $y <= $ey; ++$y){
+				for($z = $sz; $z <= $ez; ++$z){
+					$p = new Position($x, $y, $z, $level);
+					$count = $this->provider->getBlockLogCount($p);
+					if($count === 0){
+						continue;
+					}
+					$gen = $count - max(1, min($generation, $count));
+					$log = $this->provider->getBlockLog($p, $gen);
+					if($log === false){
+						continue;
+					}
+					$id = explode(":", $log["blockid"]);
+					$block = Block::get($id[0], $id[1]);
+					$level->setBlock($p, $block);
+					if($log['nbt'] !== "null"){//NBTを使用しての看板の復元処理
+						$nbt = @unserialize($log['nbt']);
+						if($nbt === false){
+							continue;
+						}
+						$blockid = (int) $id[0];
+						if($blockid === Block::SIGN_POST or $blockid === Block::WALL_SIGN){
+							if(($tile = $level->getTile($p)) instanceof Sign){
+								$tile->setText($nbt->Text1, $nbt->Text2, $nbt->Text3, $nbt->Text4);
+							}else{
+								$tile = Tile::createTile(Tile::SIGN, $level->getChunk($x >> 4, $z >> 4), new Compound("", [
+									"id" => new String("id", Tile::SIGN),
+									"x" => new Int("x", $x),
+									"y" => new Int("y", $y),
+									"z" => new Int("z", $z),
+									"Text1" => new String("Text1", $nbt->Text1),
+									"Text2" => new String("Text2", $nbt->Text2),
+									"Text3" => new String("Text3", $nbt->Text3),
+									"Text4" => new String("Text4", $nbt->Text4)
+								]));
 							}
-							$log = $this->sqlite->getLog($posp, $count - $backtime);
-							if(isset($log['blockid'])){
-								$id = $this->getIdMeta($log['blockid']);
-								$data = Block::get($id['id'], $id['meta']);
-								$this->getLogger()->info("data:id." . $id['id'] . " mata." . $id['meta']);
-								$level->setBlock($posp, $data);
-							}
-							
+							$level->sendBlocks($level->getChunkPlayers($x >> 4, $z >> 4), array($block), UpdateBlockPacket::FLAG_ALL_PRIORITY);
+							$tile->spawnToAll();
 						}
 					}
 				}
 			}
-			return true;
-		}else{
-			return false;
 		}
+		return true;
 	}
-/////////////////////////////////
-// 関数
-/////////////////////////////////
 	
-	public function dateConversion($date) {
-		return date('Y年n月j日G時i分s秒', $date);
+	//todo 特定のプレーヤーによる変更だけをロールバックできるようにする機能
+	public function playerRollback(Player $player, Position $start, Position $end, Level $level, $g = 1) {
+		$sx = min($pos[1][0], $pos[2][0]);
+		$sy = min($pos[1][1], $pos[2][1]);
+		$sz = min($pos[1][2], $pos[2][2]);
+		$ex = max($pos[1][0], $pos[2][0]);
+		$ey = max($pos[1][1], $pos[2][1]);
+		$ez = max($pos[1][2], $pos[2][2]);
+		for($x = $sx; $x <= $ex; ++$x){
+			for($y = $sy; $y <= $ey; ++$y){
+				for($z = $sz; $z <= $ez; ++$z){
+					
+				}
+			}
+		}
+		return true;
 	}
+	
+/////////////////////////////////
+// Function
+/////////////////////////////////
 	
 	public function getCommandName($cmd) {
 		$exp = explode(" ", $cmd);
@@ -319,5 +459,14 @@ class MainClass extends PluginBase implements Listener {
 		$ids['id'] = $exp[0];
 		$ids['meta'] = (isset($exp[1])) ? $exp[1]:0;
 		return $ids;
+	}
+	
+	public function getItemName($id, $meta){
+		$idmeta = $id . ":" . $meta;
+		if(isset(ItemName::$itemName[$id]) or isset(ItemName::$itemName[$idmeta])){
+			return (isset(ItemName::$itemName[$idmeta])) ? ItemName::$itemName[$idmeta]:ItemName::$itemName[$id];
+		}else{
+			return $item->getName();
+		}
 	}
 }
