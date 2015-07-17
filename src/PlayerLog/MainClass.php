@@ -450,7 +450,7 @@ class MainClass extends PluginBase implements Listener {
 	
 	public function getCommandName($cmd) {
 		$exp = explode(" ", $cmd);
-		$cmd = "/" . $exp[0];
+		$cmd = $exp[0];
 		return $cmd;
 	}
 	
