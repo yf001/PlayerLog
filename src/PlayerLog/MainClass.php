@@ -220,7 +220,7 @@ class MainClass extends PluginBase implements Listener {
 			$player = $event->getPlayer();
 			$m = $event->getMessage();
 			if($m[0] === "/"){
-				if(stripos($m, '/register') !== false or stripos($m, '/login') !== false){
+				if(stripos($m, '/register ') !== false or stripos($m, '/login ') !== false){
 					$this->getLogger()->info($player->getName() . "さんがコマンド" . $this->getCommandName($m) . "を使用しました");
 				}else{
 					$this->getLogger()->info($player->getName() . "さんがコマンドを使用しました コマンド: " . $m);
